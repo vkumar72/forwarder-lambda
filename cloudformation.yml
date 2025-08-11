@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Event Forwarder Lambda Function with S3 Trigger'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: 'prod'
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: 'Environment name'
+  
+  S3BucketName:
+    Type: String
+    Description: 'S3 bucket name to monitor for events'
+  
+  S3EventPrefix:
+    Type: String
+    Default: ''
+    Description: 'S3 object key prefix to filter events (optional)'
+  
+  S3EventSuffix:
+    Type: String
+    Default: ''
+    Description: 'S3 object key suffix to filter events (optional)'
+  
+  S3Events:
+    Type: CommaDelimitedList
+    Default: 's3:ObjectCreated:*,s3:ObjectRemoved:*'
+    Description: 'S3 events to trigger Lambda function'
+  
+  LambdaPackageBucket:
+    Type: String
+    Description: 'S3 bucket containing the Lambda package'
+  
+  LambdaPackageKey:
+    Type: String
+    Description: 'S3 key for the Lambda package'
+
+Resources:
+  # S3 Event Forwarder Lambda Function
+  S3EventForwarderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${Environment}-s3-event-forwarder'
+      Runtime: python3.9
+      Handler: main.lambda_handler
+      Role: !GetAtt S3EventForwarderRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaPackageBucket
+        S3Key: !Ref LambdaPackageKey
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          S3_BUCKET_NAME: !Ref S3BucketName
+      Timeout: 300
+      MemorySize: 512
+      ReservedConcurrencyLimit: 100
+
+  # IAM Role for Lambda Function
+  S3EventForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3EventForwarderPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:GetQueueUrl
+                Resource: !Sub 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  # Lambda Permission for S3
+  S3EventForwarderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3EventForwarderFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+
+  # S3 Bucket Notification Configuration
+  S3BucketNotification:
+    Type: AWS::S3::BucketNotification
+    Properties:
+      Bucket: !Ref S3BucketName
+      LambdaConfigurations:
+        - Event: !Ref S3Events
+          Function: !GetAtt S3EventForwarderFunction.Arn
+          Filter:
+            S3Key:
+              Rules:
+                - Name: prefix
+                  Value: !Ref S3EventPrefix
+                - Name: suffix
+                  Value: !Ref S3EventSuffix
+
+  # CloudWatch Log Group for Lambda
+  S3EventForwarderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Environment}-s3-event-forwarder'
+      RetentionInDays: 30
+
+  # CloudWatch Alarm for Lambda Errors
+  S3EventForwarderErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-s3-event-forwarder-errors'
+      AlarmDescription: 'Alarm for S3 Event Forwarder Lambda errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref S3EventForwarderFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for Lambda Duration
+  S3EventForwarderDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-s3-event-forwarder-duration'
+      AlarmDescription: 'Alarm for S3 Event Forwarder Lambda duration'
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 250000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref S3EventForwarderFunction
+      TreatMissingData: notBreaching
+
+Outputs:
+  LambdaFunctionName:
+    Description: 'Name of the S3 Event Forwarder Lambda function'
+    Value: !Ref S3EventForwarderFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'
+
+  LambdaFunctionArn:
+    Description: 'ARN of the S3 Event Forwarder Lambda function'
+    Value: !GetAtt S3EventForwarderFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+
+  S3BucketName:
+    Description: 'S3 bucket being monitored'
+    Value: !Ref S3BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-S3BucketName'
+
+  CloudWatchLogGroup:
+    Description: 'CloudWatch Log Group for Lambda function'
+    Value: !Ref S3EventForwarderLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroup' 

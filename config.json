@@ -1,0 +1,39 @@
+{
+  "sqs_queues": [
+    {
+      "name": "s3-events-processing-queue",
+      "url": "https://sqs.us-east-1.amazonaws.com/123456789012/s3-events-processing-queue",
+      "arn": "arn:aws:sqs:us-east-1:123456789012:s3-events-processing-queue",
+      "enabled": true
+    },
+    {
+      "name": "s3-events-backup-queue",
+      "url": "https://sqs.us-east-1.amazonaws.com/123456789012/s3-events-backup-queue",
+      "arn": "arn:aws:sqs:us-east-1:123456789012:s3-events-backup-queue",
+      "enabled": true
+    },
+    {
+      "name": "s3-events-analytics-queue",
+      "url": "https://sqs.us-east-1.amazonaws.com/123456789012/s3-events-analytics-queue",
+      "arn": "arn:aws:sqs:us-east-1:123456789012:s3-events-analytics-queue",
+      "enabled": false
+    }
+  ],
+  "sns_topics": [
+    {
+      "name": "s3-events-notifications",
+      "arn": "arn:aws:sns:us-east-1:123456789012:s3-events-notifications",
+      "enabled": true
+    },
+    {
+      "name": "s3-events-alerts",
+      "arn": "arn:aws:sns:us-east-1:123456789012:s3-events-alerts",
+      "enabled": true
+    },
+    {
+      "name": "s3-events-monitoring",
+      "arn": "arn:aws:sns:us-east-1:123456789012:s3-events-monitoring",
+      "enabled": false
+    }
+  ]
+} 
