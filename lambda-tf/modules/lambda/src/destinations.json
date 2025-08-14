@@ -1,0 +1,57 @@
+{
+  "destinations": [
+    {
+      "name": "processing-queue",
+      "type": "sqs",
+      "arn": "https://sqs.us-east-1.amazonaws.com/123456789012/processing-queue",
+      "enabled": true,
+      "description": "SQS queue for processing S3 events"
+    },
+    {
+      "name": "notification-topic",
+      "type": "sns",
+      "arn": "arn:aws:sns:us-east-1:123456789012:notification-topic",
+      "enabled": true,
+      "description": "SNS topic for S3 event notifications"
+    },
+    {
+      "name": "backup-queue",
+      "type": "sqs",
+      "arn": "https://sqs.us-east-1.amazonaws.com/123456789012/backup-queue",
+      "enabled": false,
+      "description": "SQS queue for backup processing (disabled)"
+    },
+    {
+      "name": "alert-topic",
+      "type": "sns",
+      "arn": "arn:aws:sns:us-east-1:123456789012:alert-topic",
+      "enabled": true,
+      "description": "SNS topic for critical alerts"
+    },
+    {
+      "name": "analytics-queue",
+      "type": "sqs",
+      "arn": "https://sqs.us-east-1.amazonaws.com/123456789012/analytics-queue",
+      "enabled": false,
+      "description": "SQS queue for analytics processing (disabled)"
+    },
+    {
+      "name": "monitoring-topic",
+      "type": "sns",
+      "arn": "arn:aws:sns:us-east-1:123456789012:monitoring-topic",
+      "enabled": true,
+      "description": "SNS topic for monitoring and metrics"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "description": "S3 Event Forwarder Destinations Configuration",
+    "last_updated": "2024-01-01",
+    "notes": [
+      "Only destinations with 'enabled: true' will receive events",
+      "SQS destinations use Queue URL format",
+      "SNS destinations use Topic ARN format",
+      "Update ARNs with your actual AWS account and resource names"
+    ]
+  }
+} 

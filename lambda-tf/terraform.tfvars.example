@@ -1,0 +1,191 @@
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Terraform State Configuration
+terraform_state_bucket = "your-terraform-state-bucket"
+create_state_bucket = false
+enable_state_locking = false
+
+# Global settings for all deployments
+global_settings = {
+  default_runtime              = "python3.11"
+  default_timeout              = 300
+  default_memory_size          = 512
+  default_log_retention        = 30
+  default_enable_metrics       = true
+  default_enable_alarms        = true
+  default_error_threshold      = 1
+  default_duration_threshold   = 250000
+  default_permission_boundary_arn = "arn:aws:iam::123456789012:policy/my-perm-boundary"  # Optional: Global permission boundary
+  
+  # VPC Configuration (optional - set to null to run Lambda outside VPC)
+  default_vpc_config = {
+    vpc_id = "vpc-12345678"
+    subnet_ids = [
+      "subnet-12345678",  # Private subnet 1
+      "subnet-87654321"   # Private subnet 2
+    ]
+    security_group_ids = [
+      "sg-12345678"  # Lambda security group
+    ]
+  }
+  
+  # Alternative: No VPC (Lambda runs outside VPC)
+  # default_vpc_config = null
+  
+  default_tags = {
+    Environment = "prod"
+    Project     = "s3-event-forwarder"
+    ManagedBy   = "terraform"
+  }
+}
+
+# Multiple Lambda deployments
+lambda_deployments = {
+  "prod-main" = {
+    function_name        = "prod-s3-event-forwarder-main"
+    source_bucket_name   = "prod-main-application-bucket"
+    runtime             = "python3.11"
+    timeout             = 300
+    memory_size         = 512
+    environment         = "prod"
+    description         = "Production S3 Event Forwarder"
+    permission_boundary_arn = "arn:aws:iam::123456789012:policy/prod-perm-boundary"  # Production-specific permission boundary
+    s3_prefix           = "uploads/"
+    s3_suffix           = ".json"
+    s3_events           = ["s3:ObjectCreated:*"]
+    environment_variables = {
+      LOG_LEVEL = "INFO"
+      MAX_RETRIES = "3"
+    }
+    log_retention_days = 30
+    enable_metrics    = true
+    enable_alarms     = true
+    error_threshold   = 1
+    duration_threshold = 250000
+    
+    # VPC Configuration (optional - overrides global setting)
+    vpc_config = {
+      vpc_id = "vpc-12345678"
+      subnet_ids = [
+        "subnet-12345678",  # Private subnet 1
+        "subnet-87654321"   # Private subnet 2
+      ]
+      security_group_ids = [
+        "sg-12345678"  # Lambda security group
+      ]
+    }
+    
+    tags = {
+      Environment = "prod"
+      FunctionType = "s3-forwarder"
+      Tier = "production"
+    }
+  }
+  
+  "staging-test" = {
+    function_name        = "staging-s3-event-forwarder-test"
+    source_bucket_name   = "staging-test-bucket"
+    timeout             = 180
+    memory_size         = 256
+    environment         = "staging"
+    description         = "Staging S3 Event Forwarder"
+    s3_prefix           = "test-data/"
+    s3_events           = ["s3:ObjectCreated:*"]
+    environment_variables = {
+      LOG_LEVEL = "DEBUG"
+    }
+    log_retention_days = 7
+    enable_metrics    = true
+    enable_alarms     = true
+    error_threshold   = 1
+    duration_threshold = 180000
+    
+    # No VPC for staging (overrides global setting)
+    vpc_config = null
+    
+    tags = {
+      Environment = "staging"
+      FunctionType = "s3-forwarder"
+      Tier = "testing"
+    }
+  }
+  
+  "dev-feature" = {
+    function_name        = "dev-s3-event-forwarder-feature"
+    source_bucket_name   = "dev-feature-bucket"
+    timeout             = 120
+    memory_size         = 128
+    environment         = "dev"
+    description         = "Development S3 Event Forwarder"
+    s3_prefix           = "feature-data/"
+    s3_events           = ["s3:ObjectCreated:*"]
+    environment_variables = {
+      LOG_LEVEL = "DEBUG"
+      FEATURE_FLAG = "true"
+    }
+    log_retention_days = 3
+    enable_metrics    = false
+    enable_alarms     = false
+    
+    # Use global VPC configuration
+    # vpc_config = null  # Will use global_settings.default_vpc_config
+    
+    tags = {
+      Environment = "dev"
+      FunctionType = "s3-forwarder"
+      Tier = "development"
+    }
+  }
+  
+  "prod-critical" = {
+    function_name        = "prod-critical-s3-forwarder"
+    source_bucket_name   = "prod-critical-bucket"
+    timeout             = 600
+    memory_size         = 1024
+    environment         = "prod"
+    description         = "Critical Production S3 Event Forwarder"
+    reserved_concurrency = 50
+    s3_prefix           = "critical/"
+    s3_events           = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
+    environment_variables = {
+      LOG_LEVEL = "INFO"
+      CRITICAL_MODE = "true"
+      MAX_RETRIES = "5"
+    }
+    log_retention_days = 90
+    enable_metrics    = true
+    enable_alarms     = true
+    error_threshold   = 0  # Alert on any error
+    duration_threshold = 500000  # 500 seconds
+    
+    # Custom VPC configuration for critical functions
+    vpc_config = {
+      vpc_id = "vpc-87654321"  # Different VPC for critical functions
+      subnet_ids = [
+        "subnet-87654321",  # Critical private subnet 1
+        "subnet-12345678"   # Critical private subnet 2
+      ]
+      security_group_ids = [
+        "sg-87654321",  # Critical Lambda security group
+        "sg-12345678"   # Additional security group
+      ]
+    }
+    
+    tags = {
+      Environment = "prod"
+      FunctionType = "s3-forwarder"
+      Tier = "critical"
+      Priority = "high"
+    }
+  }
+}
+
+# Legacy single deployment configuration (for backward compatibility)
+# Uncomment and modify if you want to use the legacy approach
+# source_bucket_name = "your-source-s3-bucket"
+# function_name = "s3-event-forwarder"
+# runtime = "python3.11"
+# timeout = 300
+# memory_size = 512
+# environment = "prod" 

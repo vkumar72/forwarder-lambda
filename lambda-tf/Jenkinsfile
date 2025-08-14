@@ -1,0 +1,215 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_REGION = 'us-east-1'
+        TF_VERSION = '1.5.0'
+        PYTHON_VERSION = '3.11'
+    }
+    
+    parameters {
+        string(name: 'ENVIRONMENT', defaultValue: 'prod', description: 'Environment to deploy to')
+        string(name: 'TERRAFORM_STATE_BUCKET', description: 'S3 bucket name for Terraform state file')
+        booleanParam(name: 'CREATE_STATE_BUCKET', defaultValue: false, description: 'Create S3 bucket for Terraform state if it doesn\'t exist')
+        booleanParam(name: 'ENABLE_STATE_LOCKING', defaultValue: false, description: 'Enable DynamoDB state locking')
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action to perform')
+        
+        // Legacy parameters for backward compatibility
+        string(name: 'SOURCE_BUCKET_NAME', defaultValue: '', description: 'Name of the pre-existing S3 bucket to monitor (legacy - use terraform.tfvars for multi-deployment)')
+        string(name: 'FUNCTION_NAME', defaultValue: 's3-event-forwarder', description: 'Lambda function name (legacy - use terraform.tfvars for multi-deployment)')
+        
+        // Multi-deployment parameters
+        text(name: 'LAMBDA_DEPLOYMENTS_JSON', defaultValue: '', description: 'JSON configuration for multiple Lambda deployments (optional)')
+        booleanParam(name: 'USE_MULTI_DEPLOYMENT', defaultValue: true, description: 'Use multi-deployment configuration from terraform.tfvars')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Setup Environment') {
+            steps {
+                script {
+                    // Install Terraform
+                    sh '''
+                        if ! command -v terraform &> /dev/null; then
+                            echo "Installing Terraform..."
+                            wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+                            echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+                            sudo apt update && sudo apt install -y terraform
+                        fi
+                        
+                        terraform --version
+                    '''
+                }
+            }
+        }
+        
+        stage('Terraform Validation') {
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        // Make script executable and validate Terraform configuration
+                        sh """
+                            chmod +x terraform-ops.sh
+                            ./terraform-ops.sh validate
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Init') {
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        // Initialize Terraform backend
+                        sh """
+                            ./terraform-ops.sh init \
+                                --bucket ${params.TERRAFORM_STATE_BUCKET} \
+                                --key lambda-s3-forwarder/${params.ENVIRONMENT}/terraform.tfstate \
+                                --region ${AWS_REGION}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Plan') {
+            when {
+                anyOf {
+                    expression { params.ACTION == 'plan' }
+                    expression { params.ACTION == 'apply' }
+                }
+            }
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        if (params.USE_MULTI_DEPLOYMENT) {
+                            // Use existing terraform.tfvars file for multi-deployment
+                            echo "Using multi-deployment configuration from terraform.tfvars"
+                            
+                            // Override global settings if provided
+                            if (params.CREATE_STATE_BUCKET || params.ENABLE_STATE_LOCKING) {
+                                sh """
+                                    # Update global settings in terraform.tfvars if it exists
+                                    if [ -f terraform.tfvars ]; then
+                                        # Backup existing file
+                                        cp terraform.tfvars terraform.tfvars.backup
+                                        
+                                        # Update global settings
+                                        sed -i 's/enable_state_bucket_creation = .*/enable_state_bucket_creation = ${params.CREATE_STATE_BUCKET}/' terraform.tfvars
+                                        sed -i 's/enable_state_locking = .*/enable_state_locking = ${params.ENABLE_STATE_LOCKING}/' terraform.tfvars
+                                    fi
+                                """
+                            }
+                        } else {
+                            // Create legacy terraform.tfvars file for single deployment
+                            echo "Using legacy single deployment configuration"
+                            sh """
+                                cat > terraform.tfvars << EOF
+aws_region = "${AWS_REGION}"
+terraform_state_bucket = "${params.TERRAFORM_STATE_BUCKET}"
+create_state_bucket = ${params.CREATE_STATE_BUCKET}
+enable_state_locking = ${params.ENABLE_STATE_LOCKING}
+source_bucket_name = "${params.SOURCE_BUCKET_NAME}"
+function_name = "${params.FUNCTION_NAME}"
+environment = "${params.ENVIRONMENT}"
+EOF
+                            """
+                        }
+                        
+                        // Run Terraform plan using the script
+                        sh """
+                            ./terraform-ops.sh plan --vars terraform.tfvars
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Apply') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        // Run Terraform apply using the script
+                        sh """
+                            ./terraform-ops.sh apply --plan-file tfplan --auto-approve
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Destroy') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        if (params.USE_MULTI_DEPLOYMENT) {
+                            // Use existing terraform.tfvars file for multi-deployment destroy
+                            echo "Using multi-deployment configuration for destroy operation"
+                        } else {
+                            // Create legacy terraform.tfvars file for single deployment destroy
+                            echo "Using legacy single deployment configuration for destroy operation"
+                            sh """
+                                cat > terraform.tfvars << EOF
+aws_region = "${AWS_REGION}"
+terraform_state_bucket = "${params.TERRAFORM_STATE_BUCKET}"
+create_state_bucket = ${params.CREATE_STATE_BUCKET}
+enable_state_locking = ${params.ENABLE_STATE_LOCKING}
+source_bucket_name = "${params.SOURCE_BUCKET_NAME}"
+function_name = "${params.FUNCTION_NAME}"
+environment = "${params.ENVIRONMENT}"
+EOF
+                            """
+                        }
+                        
+                        // Run Terraform destroy using the script
+                        sh """
+                            ./terraform-ops.sh destroy --vars terraform.tfvars --auto-approve
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Output Results') {
+            when {
+                anyOf {
+                    expression { params.ACTION == 'apply' }
+                    expression { params.ACTION == 'plan' }
+                }
+            }
+            steps {
+                dir('lambda-tf') {
+                    script {
+                        if (params.ACTION == 'apply') {
+                            sh './terraform-ops.sh output'
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo "Terraform ${params.ACTION} completed successfully!"
+        }
+        failure {
+            echo "Terraform ${params.ACTION} failed!"
+        }
+    }
+} 
